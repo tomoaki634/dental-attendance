@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2a8c8c">
+<title>勤怠打刻</title>
+<style>
+  :root { --main:#2a8c8c; --main-dark:#1f6e6e; --bg:#f4f8f8; --text:#223; --line:#d8e4e4; --warn:#c0392b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width: 520px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 16px; }
+  h2 { font-size: 16px; margin: 24px 0 8px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  label { display:block; font-size:14px; margin:12px 0 4px; }
+  input { width:100%; font-size:16px; padding:12px; border:1px solid var(--line); border-radius:8px; }
+  button { font-size:16px; border:0; border-radius:12px; padding:14px; cursor:pointer; }
+  button.primary { background:var(--main); color:#fff; width:100%; margin-top:16px; }
+  button.link { background:none; color:var(--main-dark); padding:8px; }
+  .status { font-size:28px; font-weight:bold; text-align:center; margin:8px 0 4px; color:var(--main-dark); }
+  .name { text-align:center; color:#567; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; }
+  .big { font-size:22px; padding:28px 8px; background:var(--main); color:#fff; }
+  .big.out { background:#456; }
+  .big:disabled { background:#cfd9d9; color:#8a9a9a; cursor:not-allowed; }
+  .msg { margin-top:12px; font-size:15px; min-height:22px; text-align:center; }
+  .msg.err { color:var(--warn); }
+  .msg.ok { color:var(--main-dark); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { padding:8px 4px; border-bottom:1px solid var(--line); text-align:center; }
+  th { font-weight:600; color:#567; }
+  .flag { color:var(--warn); font-weight:bold; }
+  .nav { display:flex; justify-content:space-between; align-items:center; }
+  .hidden { display:none; }
+  .note { font-size:12px; color:#789; }
+</style>
+</head>
+<body>
+<main>
+  <section id="login-view" class="hidden">
+    <h1>勤怠打刻</h1>
+    <div class="card">
+      <label for="email">メールアドレス</label>
+      <input id="email" type="email" autocomplete="username">
+      <label for="password">パスワード</label>
+      <input id="password" type="password" autocomplete="current-password">
+      <button id="login-btn" class="primary">ログイン</button>
+      <div id="login-msg" class="msg err"></div>
+    </div>
+  </section>
+
+  <section id="app-view" class="hidden">
+    <div class="nav">
+      <h1>勤怠打刻</h1>
+      <button id="logout-btn" class="link">ログアウト</button>
+    </div>
+    <div class="card">
+      <div id="user-name" class="name"></div>
+      <div id="status" class="status">読み込み中…</div>
+      <div class="grid">
+        <button id="b-clock_in" class="big">出勤</button>
+        <button id="b-clock_out" class="big out">退勤</button>
+        <button id="b-break_start" class="big">休憩開始</button>
+        <button id="b-break_end" class="big">休憩終了</button>
+      </div>
+      <div id="punch-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">本日の打刻</h2>
+      <table><tbody id="today-list"></tbody></table>
+    </div>
+
+    <div class="card">
+      <div class="nav">
+        <button id="prev-month" class="link">◀ 前の月</button>
+        <strong id="month-label"></strong>
+        <button id="next-month" class="link">次の月 ▶</button>
+      </div>
+      <table>
+        <thead><tr><th>日</th><th>出勤</th><th>退勤</th><th>休憩</th><th>勤務</th></tr></thead>
+        <tbody id="history"></tbody>
+      </table>
+      <p class="note">時刻はサーバーの記録です。退勤が空欄の日は「打刻漏れ」と表示されます。</p>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
