@@ -22,7 +22,7 @@
   .tabs { display:flex; gap:8px; margin-bottom:16px; }
   .tab { background:#e3eeee; color:var(--main-dark); flex:1; }
   .tab.active { background:var(--main); color:#fff; }
-  .counts { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:12px; }
+  .counts { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
   .count { background:#eef6f6; border-radius:10px; padding:10px; text-align:center; }
   .count b { display:block; font-size:24px; color:var(--main-dark); }
   .msg { margin-top:12px; font-size:15px; min-height:22px; text-align:center; }
@@ -34,6 +34,9 @@
   .flag { color:var(--warn); font-weight:bold; }
   .nav { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+  .qrs { border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:15px; font-weight:600; background:#eef6f6; color:#567; }
+  .qrs.ok { background:#e2f4ea; color:#1e7a46; }
+  .qrs.ng { background:#fdeaea; color:var(--warn); }
   .hidden { display:none; }
   .note { font-size:12px; color:#789; }
 </style>
@@ -67,14 +70,14 @@
 
     <section id="tab-today">
       <div class="card">
+        <div id="qr-status" class="qrs">QR表示:確認中…</div>
         <div class="counts">
           <div class="count">未出勤<b id="c-none">0</b></div>
           <div class="count">勤務中<b id="c-working">0</b></div>
-          <div class="count">休憩中<b id="c-on_break">0</b></div>
           <div class="count">退勤済み<b id="c-done">0</b></div>
         </div>
         <table>
-          <thead><tr><th class="left">スタッフ</th><th>状態</th><th>出勤</th><th>休憩開始</th><th>休憩終了</th><th>退勤</th></tr></thead>
+          <thead><tr><th class="left">スタッフ</th><th>状態</th><th>出勤</th><th>退勤</th></tr></thead>
           <tbody id="today-body"></tbody>
         </table>
       </div>
@@ -87,7 +90,7 @@
           <input id="day-input" type="date">
         </div>
         <table>
-          <thead><tr><th class="left">スタッフ</th><th>出勤</th><th>休憩開始</th><th>休憩終了</th><th>退勤</th><th>勤務時間</th><th>状況</th></tr></thead>
+          <thead><tr><th class="left">スタッフ</th><th>出勤</th><th>退勤</th><th>勤務時間</th><th>状況</th></tr></thead>
           <tbody id="day-body"></tbody>
         </table>
         <p class="note">過去の日で、出勤か退勤などが欠けている場合は「打刻漏れ」と表示されます。</p>
