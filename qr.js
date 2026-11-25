@@ -123,13 +123,6 @@ $("login-btn").addEventListener("click", async () => {
   $("password").value = "";
   start();
 });
-$("logout-btn").addEventListener("click", async () => {
-  if (!window.confirm("ログアウトすると、QRコードが表示されなくなります。よろしいですか?")) return;
-  await db.auth.signOut();
-  stop();
-  show("login");
-});
-
 (async function init() {
   const { data } = await db.auth.getSession();
   if (data && data.session) start(); else show("login");
