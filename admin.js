@@ -7,6 +7,8 @@ const $ = (id) => document.getElementById(id);
 const STATUS_TEXT = { none: "未出勤", working: "勤務中", on_break: "休憩中", done: "退勤済み" };
 const NEXT_STATUS = { clock_in: "working", break_start: "on_break", break_end: "working", clock_out: "done" };
 
+const FIXED_BREAK = Number(cfg.FIXED_BREAK_MINUTES) || 0; // 休憩の時間(分)。自動で引く
+
 let staff = [];        // { id, name, role }
 let monthOffset = 0;
 
@@ -58,7 +60,10 @@ function dayStats(evs) {
     }
   }
   let workMin = null;
-  if (cin && cout) workMin = (new Date(cout.occurred_at) - new Date(cin.occurred_at)) / 60000 - breakMin;
+  if (cin && cout) {
+    if (breakMin === 0) breakMin = FIXED_BREAK; // 休憩の打刻はしないので、決まった時間を引く
+    workMin = (new Date(cout.occurred_at) - new Date(cin.occurred_at)) / 60000 - breakMin;
+  }
   const status = sorted.length ? NEXT_STATUS[sorted[sorted.length - 1].event_type] : "none";
   const incomplete = sorted.length > 0 && (!cin || !cout || bs !== null);
   return { cin, cout, bsEv, beEv, breakMin, workMin, status, incomplete };
@@ -84,23 +89,44 @@ async function loadEvents(fromDay, toDay) {
   return map;
 }
 
+// ---- QR表示の状態(管理画面の「本日」に出す) ----
+async function updateQrStatus() {
+  const el = $("qr-status");
+  if (!el) return;
+  try {
+    const { data, error } = await db.rpc("qr_status");
+    if (error) throw error;
+    if (data && data.seconds_ago != null && data.seconds_ago <= 75) {
+      el.className = "qrs ok";
+      el.textContent = "QR表示:正常(" + data.seconds_ago + "秒前に更新)";
+    } else {
+      el.className = "qrs ng";
+      el.textContent = data && data.last_issued
+        ? "QR表示:停止中です(最後の更新 " + jstDate(data.last_issued).slice(5).replace("-", "/") + " " + jstTime(data.last_issued) + ")。院内のタブレットをご確認ください。"
+        : "QR表示:停止中です(直近の記録がありません)。院内のタブレットをご確認ください。";
+    }
+  } catch (e) {
+    el.className = "qrs";
+    el.textContent = "QR表示:状態を確認できませんでした";
+  }
+}
+setInterval(() => { if (currentTab === "today" && document.visibilityState === "visible") updateQrStatus(); }, 15000);
+
 // ---- 画面: 本日 ----
 async function renderToday() {
   const day = todayJst();
   const map = await loadEvents(day, day);
-  const counts = { none: 0, working: 0, on_break: 0, done: 0 };
+  const counts = { none: 0, working: 0, done: 0 };
   const tbody = $("today-body");
   tbody.replaceChildren();
   tbody.dataset.leftFirst = "1";
   for (const p of staff) {
     const s = dayStats((map[p.id] && map[p.id][day]) || []);
-    counts[s.status] += 1;
+    counts[s.status === "on_break" ? "working" : s.status] += 1;
     addRow(tbody, [
       staffName(p),
       STATUS_TEXT[s.status],
       s.cin ? jstTime(s.cin.occurred_at) : "",
-      s.bsEv ? jstTime(s.bsEv.occurred_at) : "",
-      s.beEv ? jstTime(s.beEv.occurred_at) : "",
       s.cout ? jstTime(s.cout.occurred_at) : "",
     ]);
   }
@@ -123,8 +149,6 @@ async function renderDay() {
     addRow(tbody, [
       staffName(p),
       s.cin ? jstTime(s.cin.occurred_at) : "",
-      s.bsEv ? jstTime(s.bsEv.occurred_at) : "",
-      s.beEv ? jstTime(s.beEv.occurred_at) : "",
       s.cout ? jstTime(s.cout.occurred_at) : "",
       fmtMinutes(s.workMin),
       { text: state, cls },
@@ -206,7 +230,7 @@ async function showTab(name) {
 async function refresh() {
   setMsg("app-msg", "");
   try {
-    if (currentTab === "today") await renderToday();
+    if (currentTab === "today") { updateQrStatus(); await renderToday(); }
     if (currentTab === "day") await renderDay();
     if (currentTab === "month") await renderMonth();
   } catch (e) {
