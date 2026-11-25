@@ -253,7 +253,7 @@ async function start() {
     setMsg("login-msg", "このアカウントは管理者ではありません。");
     return;
   }
-  const { data: list, error } = await db.from("profiles").select("id, name, role").order("name", { ascending: true });
+  const { data: list, error } = await db.from("profiles").select("id, name, role").neq("role", "display").order("name", { ascending: true });
   if (error) { show("login"); setMsg("login-msg", "スタッフ一覧を読み込めませんでした。"); return; }
   staff = list || [];
 
