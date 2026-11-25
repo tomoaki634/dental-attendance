@@ -8,7 +8,16 @@ const LABELS = { clock_in: "出勤", break_start: "休憩開始", break_end: "�
 const STATUS_TEXT = { none: "未出勤", working: "勤務中", on_break: "休憩中", done: "退勤済み" };
 const ALLOWED = { none: ["clock_in"], working: ["clock_out"], on_break: ["clock_out"], done: [] };
 const BUTTONS = ["clock_in", "clock_out"];
-const FIXED_BREAK = Number(cfg.FIXED_BREAK_MINUTES) || 0; // 休憩の時間(分)。自動で引く
+// 休憩の時間帯(日本時間)。出勤〜退勤の時間のうち、この時間帯と重なる分だけを、勤務時間から自動で引く
+const BREAK_START = cfg.BREAK_START || "13:00";
+const BREAK_END = cfg.BREAK_END || "14:30";
+function breakOverlapMin(day, cinTs, coutTs) {
+  const s = new Date(day + "T" + BREAK_START + ":00+09:00").getTime();
+  const e = new Date(day + "T" + BREAK_END + ":00+09:00").getTime();
+  const a = Math.max(s, new Date(cinTs).getTime());
+  const b = Math.min(e, new Date(coutTs).getTime());
+  return Math.max(0, (b - a) / 60000);
+}
 
 let currentUser = null;
 let monthOffset = 0;
@@ -193,7 +202,7 @@ async function refreshHistory() {
     }
     let workMin = null;
     if (cin && cout) {
-      if (breakMin === 0) breakMin = FIXED_BREAK; // 休憩の打刻はしないので、決まった時間を引く
+      breakMin = breakOverlapMin(day, cin.occurred_at, cout.occurred_at); // 休憩の時間帯と重なった分を引く
       workMin = (new Date(cout.occurred_at) - new Date(cin.occurred_at)) / 60000 - breakMin;
     }
     const missing = day !== todayJst() && (!cin || !cout || bs);
