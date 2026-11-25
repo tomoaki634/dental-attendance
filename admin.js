@@ -272,7 +272,7 @@ async function start() {
   if (!data.session) { show("login"); return; }
   const { data: me } = await db.from("profiles").select("role").eq("id", data.session.user.id).maybeSingle();
   if (!me || me.role !== "admin") {
-    await db.auth.signOut();
+    await db.auth.signOut({ scope: "local" }); // 他の端末のログインは切らない
     show("login");
     setMsg("login-msg", "このアカウントは管理者ではありません。");
     return;
