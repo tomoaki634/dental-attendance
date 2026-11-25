@@ -6,7 +6,9 @@ const $ = (id) => document.getElementById(id);
 
 const LABELS = { clock_in: "出勤", break_start: "休憩開始", break_end: "休憩終了", clock_out: "退勤" };
 const STATUS_TEXT = { none: "未出勤", working: "勤務中", on_break: "休憩中", done: "退勤済み" };
-const ALLOWED = { none: ["clock_in"], working: ["break_start", "clock_out"], on_break: ["break_end"], done: [] };
+const ALLOWED = { none: ["clock_in"], working: ["clock_out"], on_break: ["clock_out"], done: [] };
+const BUTTONS = ["clock_in", "clock_out"];
+const FIXED_BREAK = Number(cfg.FIXED_BREAK_MINUTES) || 0; // 休憩の時間(分)。自動で引く
 
 let currentUser = null;
 let monthOffset = 0;
@@ -107,11 +109,8 @@ async function refreshToday() {
   $("status").textContent = STATUS_TEXT[status];
 
   const hasToken = !!loadToken();
-  const hadBreak = events.some((e) => e.event_type === "break_start");
-  for (const type of Object.keys(LABELS)) {
-    let ok = ALLOWED[status].includes(type);
-    if (type === "break_start" && hadBreak) ok = false;
-    $("b-" + type).disabled = !ok;
+  for (const type of BUTTONS) {
+    $("b-" + type).disabled = !ALLOWED[status].includes(type);
   }
   let hint = $("qr-hint");
   if (!hint) {
@@ -194,6 +193,7 @@ async function refreshHistory() {
     }
     let workMin = null;
     if (cin && cout) {
+      if (breakMin === 0) breakMin = FIXED_BREAK; // 休憩の打刻はしないので、決まった時間を引く
       workMin = (new Date(cout.occurred_at) - new Date(cin.occurred_at)) / 60000 - breakMin;
     }
     const missing = day !== todayJst() && (!cin || !cout || bs);
@@ -310,7 +310,7 @@ async function doPunch(type) {
   }
   if (!confirm(LABELS[type] + "を打刻します。よろしいですか?")) return;
   setMsg("punch-msg", "送信中…");
-  for (const t of Object.keys(LABELS)) $("b-" + t).disabled = true;
+  for (const t of BUTTONS) $("b-" + t).disabled = true;
   const { data, error } = await db.rpc("punch_qr", {
     p_token: token,
     p_type: type,
@@ -326,7 +326,7 @@ async function doPunch(type) {
   }
   await refreshAll();
 }
-for (const type of Object.keys(LABELS)) {
+for (const type of BUTTONS) {
   $("b-" + type).addEventListener("click", () => punch(type));
 }
 
