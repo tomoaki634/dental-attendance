@@ -1,7 +1,10 @@
 "use strict";
 
 const cfg = window.APP_CONFIG || {};
-const db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+// QR表示用のログイン情報は、スタッフ画面・管理画面とは別の場所に保存する(同じブラウザで開いても、互いにログアウトさせない)
+const db = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+  auth: { storageKey: "espoir-qr-display-auth", persistSession: true, autoRefreshToken: true },
+});
 const $ = (id) => document.getElementById(id);
 
 const INTERVAL_MS = 30 * 1000;   // QRを切り替える間隔
@@ -52,7 +55,7 @@ async function issue() {
   } catch (e) {
     const msg = (e && e.message) || "";
     if (msg.indexOf("QR表示用") >= 0) {
-      await db.auth.signOut();
+      await db.auth.signOut({ scope: "local" });
       stop();
       show("login");
       $("login-msg").textContent = "このアカウントは、QR表示用ではありません。";
