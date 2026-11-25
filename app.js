@@ -11,6 +11,27 @@ const ALLOWED = { none: ["clock_in"], working: ["break_start", "clock_out"], on_
 let currentUser = null;
 let monthOffset = 0;
 
+// ---- 院内QRコードの文字列(スマホのカメラで読み取ると、アドレスの後ろに付いてくる) ----
+let memToken = null;
+function saveToken(t) {
+  memToken = t;
+  try { sessionStorage.setItem("qrToken", t); } catch (e) { /* 保存できない端末でも動くようにする */ }
+}
+function loadToken() {
+  try { return sessionStorage.getItem("qrToken") || memToken; } catch (e) { return memToken; }
+}
+function clearToken() {
+  memToken = null;
+  try { sessionStorage.removeItem("qrToken"); } catch (e) { /* 何もしない */ }
+}
+(function captureToken() {
+  const m = /[#&]q=([0-9a-f]{20,128})/.exec(location.hash);
+  if (m) {
+    saveToken(m[1]);
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* 何もしない */ }
+  }
+})();
+
 // ---- 日時の表示(日本時間) ----
 function jstDate(ts) {
   return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Tokyo" }).format(new Date(ts)); // YYYY-MM-DD
@@ -85,12 +106,24 @@ async function refreshToday() {
   const status = statusFromEvents(events);
   $("status").textContent = STATUS_TEXT[status];
 
+  const hasToken = !!loadToken();
   const hadBreak = events.some((e) => e.event_type === "break_start");
   for (const type of Object.keys(LABELS)) {
-    let ok = ALLOWED[status].includes(type);
+    let ok = ALLOWED[status].includes(type) && hasToken;
     if (type === "break_start" && hadBreak) ok = false;
     $("b-" + type).disabled = !ok;
   }
+  let hint = $("qr-hint");
+  if (!hint) {
+    hint = document.createElement("div");
+    hint.id = "qr-hint";
+    hint.className = "note";
+    hint.style.textAlign = "center";
+    $("status").after(hint);
+  }
+  hint.textContent = (!hasToken && status !== "done")
+    ? "打刻するには、院内のQRコードを、スマートフォンのカメラで読み取ってください。"
+    : "";
 
   const tbody = $("today-list");
   tbody.replaceChildren();
@@ -188,17 +221,27 @@ async function refreshHistory() {
 
 // ---- 打刻 ----
 async function punch(type) {
+  const token = loadToken();
+  if (!token) {
+    setMsg("punch-msg", "院内のQRコードを、スマートフォンのカメラで読み取ってください。", "err");
+    await refreshAll();
+    return;
+  }
   if (!confirm(LABELS[type] + "を打刻します。よろしいですか?")) return;
   setMsg("punch-msg", "送信中…");
   for (const t of Object.keys(LABELS)) $("b-" + t).disabled = true;
-  const { data, error } = await db.rpc("punch", {
+  const { data, error } = await db.rpc("punch_qr", {
+    p_token: token,
     p_type: type,
     p_device: navigator.userAgent,
   });
   if (error) {
     setMsg("punch-msg", error.message, "err");
+    // QRの期限切れ・使用済みの場合は、読み取り直してもらう
+    if (/QRコード/.test(error.message)) clearToken();
   } else {
     setMsg("punch-msg", LABELS[type] + "を打刻しました(" + jstTime(data.occurred_at) + ")", "ok");
+    clearToken(); // 1回の打刻ごとに、QRコードを読み取り直す
   }
   await refreshAll();
 }
