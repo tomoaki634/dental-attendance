@@ -109,7 +109,7 @@ async function refreshToday() {
   const hasToken = !!loadToken();
   const hadBreak = events.some((e) => e.event_type === "break_start");
   for (const type of Object.keys(LABELS)) {
-    let ok = ALLOWED[status].includes(type) && hasToken;
+    let ok = ALLOWED[status].includes(type);
     if (type === "break_start" && hadBreak) ok = false;
     $("b-" + type).disabled = !ok;
   }
@@ -121,8 +121,8 @@ async function refreshToday() {
     hint.style.textAlign = "center";
     $("status").after(hint);
   }
-  hint.textContent = (!hasToken && status !== "done")
-    ? "打刻するには、院内のQRコードを、スマートフォンのカメラで読み取ってください。"
+  hint.textContent = status !== "done"
+    ? (hasToken ? "QRコードを読み取り済みです。ボタンを押してください。" : "ボタンを押すと、カメラが起動します。院内のQRコードを読み取ってください。")
     : "";
 
   const tbody = $("today-list");
@@ -219,13 +219,94 @@ async function refreshHistory() {
   }
 }
 
+// ---- アプリ内のカメラで、院内のQRコードを読み取る ----
+function loadJsQr() {
+  if (window.jsQR) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+    s.onload = () => (window.jsQR ? resolve() : reject(new Error("jsqr")));
+    s.onerror = () => reject(new Error("jsqr"));
+    document.head.appendChild(s);
+  });
+}
+async function scanQr() {
+  await loadJsQr();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("camera");
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "position:fixed;inset:0;z-index:1000;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:16px;";
+  const video = document.createElement("video");
+  video.setAttribute("playsinline", "");
+  video.muted = true;
+  video.style.cssText = "width:100%;max-width:480px;max-height:65vh;object-fit:cover;border-radius:12px;";
+  const text = document.createElement("div");
+  text.textContent = "院内のQRコードを、画面に映してください";
+  text.style.cssText = "color:#fff;font-size:16px;text-align:center;";
+  const cancel = document.createElement("button");
+  cancel.textContent = "キャンセル";
+  cancel.style.cssText = "font-size:16px;padding:12px 28px;border:0;border-radius:12px;background:#fff;color:#223;";
+  wrap.append(video, text, cancel);
+  document.body.appendChild(wrap);
+  video.srcObject = stream;
+  video.play().catch(() => {});
+
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const started = Date.now();
+    function finish(fn) {
+      if (done) return;
+      done = true;
+      clearInterval(timer);
+      stream.getTracks().forEach((t) => t.stop());
+      wrap.remove();
+      fn();
+    }
+    cancel.addEventListener("click", () => finish(() => reject(new Error("cancel"))));
+    const timer = setInterval(() => {
+      if (Date.now() - started > 90000) { finish(() => reject(new Error("cancel"))); return; }
+      if (video.readyState < 2 || !video.videoWidth) return;
+      const w = Math.min(640, video.videoWidth);
+      const h = Math.round((video.videoHeight * w) / video.videoWidth);
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(video, 0, 0, w, h);
+      const img = ctx.getImageData(0, 0, w, h);
+      const r = window.jsQR(img.data, w, h, { inversionAttempts: "dontInvert" });
+      if (r && r.data) {
+        const m = /[#&]q=([0-9a-f]{20,128})$/.exec(r.data);
+        if (m) finish(() => resolve(m[1]));
+      }
+    }, 250);
+  });
+}
+
 // ---- 打刻 ----
+let punching = false;
 async function punch(type) {
-  const token = loadToken();
+  if (punching) return;
+  punching = true;
+  try {
+    await doPunch(type);
+  } finally {
+    punching = false;
+  }
+}
+async function doPunch(type) {
+  let token = loadToken();
   if (!token) {
-    setMsg("punch-msg", "院内のQRコードを、スマートフォンのカメラで読み取ってください。", "err");
-    await refreshAll();
-    return;
+    setMsg("punch-msg", "");
+    try {
+      token = await scanQr();
+      saveToken(token);
+    } catch (e) {
+      if (e && e.message === "cancel") return;
+      setMsg("punch-msg", "カメラを使えませんでした。ブラウザのカメラの許可をご確認いただくか、スマートフォン標準のカメラで、院内のQRコードを読み取ってください。", "err");
+      return;
+    }
   }
   if (!confirm(LABELS[type] + "を打刻します。よろしいですか?")) return;
   setMsg("punch-msg", "送信中…");
