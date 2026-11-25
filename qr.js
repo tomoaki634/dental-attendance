@@ -126,6 +126,15 @@ $("login-btn").addEventListener("click", async () => {
   $("password").value = "";
   start();
 });
+// 何らかの理由でログアウトされたときは、その旨を画面に出す(原因をつかむため)
+db.auth.onAuthStateChange((event) => {
+  if (event === "SIGNED_OUT" && ticking) {
+    stop();
+    show("login");
+    $("login-msg").textContent = "ログアウトされました(" + new Date().toLocaleTimeString("ja-JP") + ")。もう一度ログインしてください。";
+  }
+});
+
 (async function init() {
   const { data } = await db.auth.getSession();
   if (data && data.session) start(); else show("login");
