@@ -78,11 +78,24 @@ function dayStats(evs) {
   return { cin, cout, bsEv, beEv, breakMin, workMin, status, incomplete };
 }
 
+const TYPE_TEXT = { clock_in: "出勤", clock_out: "退勤" };
+// 1日の状況の文字と色(過去の日の欠け・勤務が短すぎる・修正あり)
+function dayFlag(evs, s, isPast) {
+  if (isPast && s.incomplete) {
+    if (!s.cin) return { text: "出勤なし", cls: "flag" };
+    if (!s.cout) return { text: "退勤なし", cls: "flag" };
+    return { text: "打刻漏れ", cls: "flag" };
+  }
+  if (s.workMin != null && s.workMin < 30) return { text: "要確認(勤務が短い)", cls: "flag" };
+  if (evs.some((e) => e.source === "correction")) return { text: "修正あり", cls: "" };
+  return null;
+}
+
 // ---- データ取得 ----
 async function loadEvents(fromDay, toDay) {
   const { data, error } = await db
     .from("attendance_events")
-    .select("user_id, event_type, occurred_at, work_date")
+    .select("user_id, event_type, occurred_at, work_date, source")
     .gte("work_date", fromDay)
     .lte("work_date", toDay)
     .order("occurred_at", { ascending: true })
@@ -132,9 +145,10 @@ async function renderToday() {
   for (const p of staff) {
     const s = dayStats((map[p.id] && map[p.id][day]) || []);
     counts[s.status === "on_break" ? "working" : s.status] += 1;
+    const noIn = !s.cin && s.status === "done";
     addRow(tbody, [
       staffName(p),
-      STATUS_TEXT[s.status],
+      noIn ? { text: "退勤済み(出勤なし)", cls: "flag" } : STATUS_TEXT[s.status],
       s.cin ? jstTime(s.cin.occurred_at) : "",
       s.cout ? jstTime(s.cout.occurred_at) : "",
     ]);
@@ -151,10 +165,12 @@ async function renderDay() {
   tbody.dataset.leftFirst = "1";
   const isPast = day < todayJst();
   for (const p of staff) {
-    const s = dayStats((map[p.id] && map[p.id][day]) || []);
+    const evs = (map[p.id] && map[p.id][day]) || [];
+    const s = dayStats(evs);
     let state = STATUS_TEXT[s.status];
     let cls = "";
-    if (s.incomplete && isPast) { state = "打刻漏れ"; cls = "flag"; }
+    const fl = dayFlag(evs, s, isPast);
+    if (fl) { state = fl.text; cls = fl.cls; }
     addRow(tbody, [
       staffName(p),
       s.cin ? jstTime(s.cin.occurred_at) : "",
@@ -214,23 +230,139 @@ async function renderMonth() {
   }
   for (const d of days) {
     const s = dayStats(byDay[d]);
-    const miss = s.incomplete && d < today;
+    const fl = dayFlag(byDay[d], s, d < today);
     addRow(detail, [
       Number(d.slice(8)) + "日",
       s.cin ? jstTime(s.cin.occurred_at) : "",
       s.cout ? jstTime(s.cout.occurred_at) : "",
       fmtMinutes(s.breakMin),
       fmtMinutes(s.workMin),
-      { text: miss ? "打刻漏れ" : "", cls: miss ? "flag" : "" },
+      { text: fl ? fl.text : "", cls: fl ? fl.cls : "" },
     ]);
   }
 }
+
+// ---- 画面: 修正申請 ----
+function nameOf(id) {
+  const p = staff.find((x) => x.id === id);
+  return p ? staffName(p) : "(不明)";
+}
+function shortDate(d) { return d.slice(5).replace("-", "/"); }
+function cell(tr, text, cls) {
+  const td = document.createElement("td");
+  td.textContent = text == null ? "" : text;
+  if (cls) td.className = cls;
+  tr.appendChild(td);
+  return td;
+}
+async function updateCorrBadge() {
+  const { count, error } = await db.from("correction_requests").select("id", { count: "exact", head: true }).eq("status", "pending");
+  const b = $("corr-badge");
+  if (error || !count) { b.classList.add("hidden"); return; }
+  b.textContent = String(count);
+  b.classList.remove("hidden");
+}
+async function decide(id, approve, time) {
+  let note = null;
+  if (!approve) {
+    note = prompt("却下の理由(スタッフに表示されます。空欄でも構いません)");
+    if (note === null) return;
+  } else if (!confirm("この内容で承認して、記録に反映します。よろしいですか?")) {
+    return;
+  }
+  setMsg("app-msg", "");
+  const { error } = await db.rpc("decide_correction", { p_id: id, p_approve: approve, p_time: time || null, p_note: note });
+  if (error) { setMsg("app-msg", error.message); return; }
+  await renderCorr();
+}
+async function renderCorr() {
+  const { data: pend, error: e1 } = await db
+    .from("correction_requests")
+    .select("id, user_id, work_date, event_type, requested_time, reason")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(100);
+  if (e1) throw e1;
+  const pb = $("corr-pending");
+  pb.replaceChildren();
+  if (!pend || !pend.length) {
+    const tr = document.createElement("tr");
+    const td = cell(tr, "申請中のものはありません");
+    td.colSpan = 6;
+    pb.appendChild(tr);
+  }
+  for (const r of pend || []) {
+    const tr = document.createElement("tr");
+    cell(tr, nameOf(r.user_id), "left");
+    cell(tr, shortDate(r.work_date));
+    cell(tr, TYPE_TEXT[r.event_type]);
+    const tdTime = document.createElement("td");
+    const ti = document.createElement("input");
+    ti.type = "time";
+    ti.value = (r.requested_time || "").slice(0, 5);
+    tdTime.appendChild(ti);
+    tr.appendChild(tdTime);
+    cell(tr, r.reason, "wrap");
+    const tdAct = document.createElement("td");
+    const ok = document.createElement("button");
+    ok.className = "sm ok"; ok.textContent = "承認";
+    ok.addEventListener("click", () => decide(r.id, true, ti.value));
+    const ng = document.createElement("button");
+    ng.className = "sm ng"; ng.textContent = "却下";
+    ng.addEventListener("click", () => decide(r.id, false, null));
+    tdAct.append(ok, ng);
+    tr.appendChild(tdAct);
+    pb.appendChild(tr);
+  }
+
+  const { data: done, error: e2 } = await db
+    .from("correction_requests")
+    .select("user_id, work_date, event_type, requested_time, final_time, status, decided_by, decision_note")
+    .neq("status", "pending")
+    .order("decided_at", { ascending: false })
+    .limit(30);
+  if (e2) throw e2;
+  const dbody = $("corr-done");
+  dbody.replaceChildren();
+  if (!done || !done.length) {
+    const tr = document.createElement("tr");
+    const td = cell(tr, "処理済みのものはありません");
+    td.colSpan = 6;
+    dbody.appendChild(tr);
+  }
+  for (const r of done || []) {
+    const tr = document.createElement("tr");
+    cell(tr, nameOf(r.user_id), "left");
+    cell(tr, shortDate(r.work_date));
+    cell(tr, TYPE_TEXT[r.event_type]);
+    cell(tr, (r.final_time || r.requested_time || "").slice(0, 5));
+    cell(tr, r.status === "approved" ? "承認" : "却下" + (r.decision_note ? "(" + r.decision_note + ")" : ""), "st-" + r.status);
+    cell(tr, r.decided_by ? nameOf(r.decided_by) : "", "left");
+    dbody.appendChild(tr);
+  }
+  await updateCorrBadge();
+}
+let adding = false;
+$("add-btn").addEventListener("click", async () => {
+  if (adding) return;
+  const uid = $("add-staff").value, day = $("add-date").value, type = $("add-type").value, time = $("add-time").value, note = $("add-note").value.trim();
+  if (!uid || !day || !time) { setMsg("add-msg", "スタッフ・日付・時刻を入力してください。"); $("add-msg").className = "msg err"; return; }
+  if (!note) { setMsg("add-msg", "理由を入力してください。"); $("add-msg").className = "msg err"; return; }
+  if (!confirm(nameOf(uid) + " さんの " + day.replace(/-/g, "/") + " の" + TYPE_TEXT[type] + "を " + time + " として追加します。よろしいですか?")) return;
+  adding = true;
+  setMsg("add-msg", "送信中…"); $("add-msg").className = "msg";
+  const { error } = await db.rpc("admin_add_event", { p_user: uid, p_date: day, p_type: type, p_time: time, p_note: note });
+  adding = false;
+  if (error) { setMsg("add-msg", error.message); $("add-msg").className = "msg err"; return; }
+  setMsg("add-msg", "追加しました。"); $("add-msg").className = "msg";
+  $("add-note").value = ""; $("add-time").value = "";
+});
 
 // ---- タブ ----
 let currentTab = "today";
 async function showTab(name) {
   currentTab = name;
-  for (const t of ["today", "day", "month"]) {
+  for (const t of ["today", "day", "month", "corr"]) {
     $("tab-" + t).classList.toggle("hidden", t !== name);
   }
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
@@ -242,8 +374,10 @@ async function refresh() {
     if (currentTab === "today") { updateQrStatus(); await renderToday(); }
     if (currentTab === "day") await renderDay();
     if (currentTab === "month") await renderMonth();
+    if (currentTab === "corr") await renderCorr(); else updateCorrBadge();
   } catch (e) {
-    setMsg("app-msg", "データを読み込めませんでした。通信状況をご確認ください。");
+    console.error(e);
+    setMsg("app-msg", "データを読み込めませんでした。通信状況をご確認ください。" + (e && e.message ? "(" + e.message + ")" : ""));
   }
 }
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
@@ -298,6 +432,16 @@ async function start() {
     o.textContent = staffName(p);
     sel.appendChild(o);
   }
+  const addSel = $("add-staff");
+  addSel.replaceChildren();
+  for (const p of staff) {
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = staffName(p);
+    addSel.appendChild(o);
+  }
+  $("add-date").value = todayJst();
+  $("add-date").max = todayJst();
   $("day-input").value = todayJst();
   show("app");
   await showTab("today");

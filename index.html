@@ -36,6 +36,13 @@
   .nav { display:flex; justify-content:space-between; align-items:center; }
   .hidden { display:none; }
   .note { font-size:12px; color:#789; }
+  select, textarea { width:100%; font-size:16px; padding:12px; border:1px solid var(--line); border-radius:8px; font-family:inherit; background:#fff; }
+  textarea { min-height:72px; resize:vertical; }
+  details.card > summary { cursor:pointer; font-weight:600; color:var(--main-dark); }
+  .flag.tap { cursor:pointer; text-decoration:underline; }
+  .st-pending { color:#a66a00; font-weight:600; }
+  .st-approved { color:var(--main-dark); font-weight:600; }
+  .st-rejected { color:var(--warn); font-weight:600; }
 </style>
 </head>
 <body>
@@ -67,6 +74,29 @@
       <div id="punch-msg" class="msg"></div>
     </div>
 
+    <details id="corr-card" class="card">
+      <summary>打刻を忘れたとき(修正の申請)</summary>
+      <p class="note">出勤や退勤の打刻を忘れた日の時刻を、ここから申請します。管理者が確認して、記録に反映します。</p>
+      <label for="corr-date">日付</label>
+      <input id="corr-date" type="date">
+      <label for="corr-type">種類</label>
+      <select id="corr-type">
+        <option value="clock_in">出勤</option>
+        <option value="clock_out">退勤</option>
+      </select>
+      <label for="corr-time">時刻</label>
+      <input id="corr-time" type="time">
+      <label for="corr-reason">理由</label>
+      <textarea id="corr-reason" maxlength="300" placeholder="例:出勤の打刻を忘れた"></textarea>
+      <button id="corr-btn" class="primary">申請する</button>
+      <div id="corr-msg" class="msg"></div>
+      <h2>申請の状況</h2>
+      <table>
+        <thead><tr><th>日付</th><th>種類</th><th>時刻</th><th>状況</th></tr></thead>
+        <tbody id="corr-list"></tbody>
+      </table>
+    </details>
+
     <div class="card">
       <h2 style="margin-top:0">本日の打刻</h2>
       <table><tbody id="today-list"></tbody></table>
@@ -82,7 +112,7 @@
         <thead><tr><th>日</th><th>出勤</th><th>退勤</th><th>休憩</th><th>勤務</th></tr></thead>
         <tbody id="history"></tbody>
       </table>
-      <p class="note">時刻はサーバーの記録です。退勤が空欄の日は「打刻漏れ」と表示されます。</p>
+      <p class="note">時刻はサーバーの記録です。出勤や退勤が空欄の日は赤く表示されます。タップすると、修正の申請に進めます。</p>
     </div>
   </section>
 </main>

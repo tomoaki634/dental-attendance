@@ -6,7 +6,7 @@ const $ = (id) => document.getElementById(id);
 
 const LABELS = { clock_in: "出勤", break_start: "休憩開始", break_end: "休憩終了", clock_out: "退勤" };
 const STATUS_TEXT = { none: "未出勤", working: "勤務中", on_break: "休憩中", done: "退勤済み" };
-const ALLOWED = { none: ["clock_in"], working: ["clock_out"], on_break: ["clock_out"], done: [] };
+const ALLOWED = { none: ["clock_in", "clock_out"], working: ["clock_out"], on_break: ["clock_out"], done: [] };
 const BUTTONS = ["clock_in", "clock_out"];
 // 休憩の時間帯(日本時間)。出勤〜退勤の時間のうち、この時間帯と重なる分だけを、勤務時間から自動で引く
 const BREAK_START = cfg.BREAK_START || "13:00";
@@ -129,9 +129,11 @@ async function refreshToday() {
     hint.style.textAlign = "center";
     $("status").after(hint);
   }
-  hint.textContent = status !== "done"
+  let hintText = status !== "done"
     ? (hasToken ? "QRコードを読み取り済みです。ボタンを押してください。" : "ボタンを押すと、カメラが起動します。院内のQRコードを読み取ってください。")
     : "";
+  if (status === "none") hintText += "出勤の打刻を忘れたときも、「退勤」を押せます。出勤の時刻は、あとで「打刻を忘れたとき」から申請してください。";
+  hint.textContent = hintText;
 
   const tbody = $("today-list");
   tbody.replaceChildren();
@@ -221,8 +223,10 @@ async function refreshHistory() {
       tr.appendChild(td);
     }
     if (missing) {
-      tr.lastChild.textContent = "打刻漏れ";
-      tr.lastChild.className = "flag";
+      const kind = !cin ? "clock_in" : "clock_out";
+      tr.lastChild.textContent = !cin ? "出勤なし" : "退勤なし";
+      tr.lastChild.className = "flag tap";
+      tr.lastChild.addEventListener("click", () => prefillCorrection(day, kind));
     }
     tbody.appendChild(tr);
   }
@@ -317,7 +321,11 @@ async function doPunch(type) {
       return;
     }
   }
-  if (!confirm(LABELS[type] + "を打刻します。よろしいですか?")) return;
+  let ask = LABELS[type] + "を打刻します(現在 " + jstTime(Date.now()) + ")。よろしいですか?";
+  if (type === "clock_in" && Number(jstTime(Date.now()).slice(0, 2)) >= 12) {
+    ask += "\n\n朝の出勤を忘れた場合は、キャンセルして「退勤」を押してください。";
+  }
+  if (!confirm(ask)) return;
   setMsg("punch-msg", "送信中…");
   for (const t of BUTTONS) $("b-" + t).disabled = true;
   const { data, error } = await db.rpc("punch_qr", {
@@ -339,6 +347,77 @@ for (const type of BUTTONS) {
   $("b-" + type).addEventListener("click", () => punch(type));
 }
 
+// ---- 打刻の修正の申請 ----
+const CORR_STATUS = { pending: "申請中", approved: "承認", rejected: "却下" };
+function prefillCorrection(day, type) {
+  $("corr-date").value = day;
+  $("corr-type").value = type;
+  $("corr-card").open = true;
+  setMsg("corr-msg", "");
+  $("corr-card").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+async function refreshCorrections() {
+  const { data, error } = await db
+    .from("correction_requests")
+    .select("work_date, event_type, requested_time, final_time, status, decision_note")
+    .order("created_at", { ascending: false })
+    .limit(15);
+  if (error) throw error;
+  const tbody = $("corr-list");
+  tbody.replaceChildren();
+  if (!data || !data.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.textContent = "申請はまだありません";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const r of data) {
+    const tr = document.createElement("tr");
+    const t = (r.final_time || r.requested_time || "").slice(0, 5);
+    const cells = [r.work_date.slice(5).replace("-", "/"), LABELS[r.event_type], t];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      td.textContent = c;
+      tr.appendChild(td);
+    }
+    const st = document.createElement("td");
+    st.textContent = CORR_STATUS[r.status] + (r.status === "rejected" && r.decision_note ? "(" + r.decision_note + ")" : "");
+    st.className = "st-" + r.status;
+    tr.appendChild(st);
+    tbody.appendChild(tr);
+  }
+}
+function initCorrectionForm() {
+  const today = todayJst();
+  const min = new Date(Date.now() - 45 * 86400000);
+  $("corr-date").max = today;
+  $("corr-date").min = jstDate(min);
+  if (!$("corr-date").value) $("corr-date").value = today;
+}
+let submittingCorr = false;
+$("corr-btn").addEventListener("click", async () => {
+  if (submittingCorr) return;
+  const day = $("corr-date").value;
+  const type = $("corr-type").value;
+  const time = $("corr-time").value;
+  const reason = $("corr-reason").value.trim();
+  if (!day || !time) { setMsg("corr-msg", "日付と時刻を入力してください。", "err"); return; }
+  if (!reason) { setMsg("corr-msg", "理由を入力してください。", "err"); return; }
+  if (!confirm(day.replace(/-/g, "/") + " の" + LABELS[type] + "を " + time + " として申請します。よろしいですか?")) return;
+  submittingCorr = true;
+  setMsg("corr-msg", "送信中…");
+  const { error } = await db.rpc("request_correction", { p_date: day, p_type: type, p_time: time, p_reason: reason });
+  submittingCorr = false;
+  if (error) { setMsg("corr-msg", error.message, "err"); return; }
+  setMsg("corr-msg", "申請しました。管理者の確認をお待ちください。", "ok");
+  $("corr-reason").value = "";
+  $("corr-time").value = "";
+  try { await refreshCorrections(); } catch (e) { /* 一覧は次回の表示で更新される */ }
+});
+
 $("prev-month").addEventListener("click", async () => { monthOffset -= 1; await refreshHistory(); });
 $("next-month").addEventListener("click", async () => { if (monthOffset < 0) { monthOffset += 1; await refreshHistory(); } });
 
@@ -346,6 +425,7 @@ async function refreshAll() {
   try {
     await refreshToday();
     await refreshHistory();
+    await refreshCorrections();
   } catch (e) {
     setMsg("punch-msg", "データを読み込めませんでした。通信状況をご確認ください。", "err");
   }
@@ -359,6 +439,7 @@ async function start() {
   const { data: prof } = await db.from("profiles").select("name").eq("id", currentUser.id).maybeSingle();
   $("user-name").textContent = (prof && prof.name) || currentUser.email;
   show("app");
+  initCorrectionForm();
   await refreshAll();
 }
 start();

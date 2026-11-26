@@ -41,6 +41,15 @@
   .qrs.ng { background:#fdeaea; color:var(--warn); }
   .hidden { display:none; }
   .note { font-size:12px; color:#789; }
+  select, textarea { font-family:inherit; background:#fff; }
+  textarea { width:100%; font-size:16px; padding:10px; border:1px solid var(--line); border-radius:8px; }
+  button.sm { font-size:14px; padding:8px 12px; margin:2px; }
+  button.ok { background:var(--main); color:#fff; }
+  button.ng { background:#fdeaea; color:var(--warn); }
+  .badge { display:inline-block; min-width:20px; padding:0 6px; margin-left:4px; border-radius:10px; background:var(--warn); color:#fff; font-size:13px; line-height:20px; }
+  td.wrap { white-space:normal; text-align:left; min-width:120px; }
+  .st-approved { color:var(--main-dark); font-weight:600; }
+  .st-rejected { color:var(--warn); font-weight:600; }
 </style>
 </head>
 <body>
@@ -67,6 +76,7 @@
       <button class="tab active" data-tab="today">本日</button>
       <button class="tab" data-tab="day">日別</button>
       <button class="tab" data-tab="month">月別</button>
+      <button class="tab" data-tab="corr">修正申請<span id="corr-badge" class="badge hidden">0</span></button>
     </div>
     <div id="app-msg" class="msg err"></div>
 
@@ -120,6 +130,36 @@
         <table>
           <thead><tr><th>日</th><th>出勤</th><th>退勤</th><th>休憩</th><th>勤務</th><th>状況</th></tr></thead>
           <tbody id="month-detail"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-corr" class="hidden">
+      <div class="card">
+        <h2 style="margin-top:0">申請中</h2>
+        <table>
+          <thead><tr><th class="left">スタッフ</th><th>日付</th><th>種類</th><th>時刻</th><th class="left">理由</th><th>処理</th></tr></thead>
+          <tbody id="corr-pending"></tbody>
+        </table>
+        <p class="note">時刻は、承認の前に直せます。出勤は一番早い時刻、退勤は一番遅い時刻が、勤務時間の計算に使われます。</p>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">管理者が直接追加する</h2>
+        <div class="row">
+          <select id="add-staff"></select>
+          <input id="add-date" type="date">
+          <select id="add-type"><option value="clock_in">出勤</option><option value="clock_out">退勤</option></select>
+          <input id="add-time" type="time">
+        </div>
+        <textarea id="add-note" maxlength="300" placeholder="理由(必須)。例:本人に確認、朝の打刻漏れ"></textarea>
+        <button id="add-btn" class="primary">追加する</button>
+        <div id="add-msg" class="msg"></div>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">処理済み(直近30件)</h2>
+        <table>
+          <thead><tr><th class="left">スタッフ</th><th>日付</th><th>種類</th><th>時刻</th><th>結果</th><th class="left">処理した人</th></tr></thead>
+          <tbody id="corr-done"></tbody>
         </table>
       </div>
     </section>
