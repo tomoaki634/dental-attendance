@@ -426,6 +426,7 @@ async function refreshAll() {
     await refreshToday();
     await refreshHistory();
     await refreshCorrections();
+    await refreshLeaves();
   } catch (e) {
     setMsg("punch-msg", "データを読み込めませんでした。通信状況をご確認ください。", "err");
   }
@@ -462,6 +463,96 @@ function initPasswordCard() {
   });
 }
 
+// ---- 有給の申請(画面の部品は、ここで作る) ----
+const LEAVE_KIND = { full: "全日", am: "午前休(半日)", pm: "午後休(半日)" };
+const LEAVE_STATUS = { pending: "申請中", approved: "承認", rejected: "却下", cancelled: "取り消し" };
+function initLeaveCard() {
+  if ($("lv-card")) return;
+  const mk = (tag, props, text) => { const e = document.createElement(tag); Object.assign(e, props || {}); if (text) e.textContent = text; return e; };
+  const card = mk("details", { id: "lv-card", className: "card" });
+  card.appendChild(mk("summary", {}, "有給休暇の申請"));
+  card.appendChild(mk("p", { className: "note" }, "休みたい日を選んで申請します。管理者が確認して、承認されると有給になります。"));
+  card.appendChild(mk("label", { htmlFor: "lv-date" }, "日付"));
+  card.appendChild(mk("input", { id: "lv-date", type: "date" }));
+  card.appendChild(mk("label", { htmlFor: "lv-kind" }, "種類"));
+  const sel = mk("select", { id: "lv-kind" });
+  for (const k of ["full", "am", "pm"]) sel.appendChild(mk("option", { value: k }, LEAVE_KIND[k]));
+  card.appendChild(sel);
+  card.appendChild(mk("label", { htmlFor: "lv-reason" }, "理由(書かなくても大丈夫です)"));
+  card.appendChild(mk("textarea", { id: "lv-reason", maxLength: 300 }));
+  card.appendChild(mk("button", { id: "lv-btn", className: "primary" }, "申請する"));
+  card.appendChild(mk("div", { id: "lv-msg", className: "msg" }));
+  card.appendChild(mk("h2", {}, "申請の状況"));
+  const table = mk("table");
+  const thead = mk("thead");
+  const trh = mk("tr");
+  for (const t of ["日付", "種類", "状況", ""]) trh.appendChild(mk("th", {}, t));
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  table.appendChild(mk("tbody", { id: "lv-list" }));
+  card.appendChild(table);
+  const anchor = $("pw-card") || $("corr-card");
+  anchor.parentNode.insertBefore(card, anchor);
+
+  const today = jstDate(Date.now());
+  const min = new Date(Date.now() - 30 * 86400000), max = new Date(Date.now() + 365 * 86400000);
+  $("lv-date").min = jstDate(min); $("lv-date").max = jstDate(max); $("lv-date").value = today;
+
+  $("lv-btn").addEventListener("click", async () => {
+    const day = $("lv-date").value, kind = $("lv-kind").value, reason = $("lv-reason").value.trim();
+    if (!day) { setMsg("lv-msg", "日付を入力してください。", "err"); return; }
+    if (!confirm(day.replace(/-/g, "/") + " を、有給(" + LEAVE_KIND[kind] + ")として申請します。よろしいですか?")) return;
+    $("lv-btn").disabled = true;
+    setMsg("lv-msg", "送信中…");
+    const { error } = await db.rpc("request_leave", { p_date: day, p_kind: kind, p_reason: reason || null });
+    $("lv-btn").disabled = false;
+    if (error) { setMsg("lv-msg", error.message, "err"); return; }
+    $("lv-reason").value = "";
+    setMsg("lv-msg", "申請しました。管理者の確認をお待ちください。", "ok");
+    await refreshLeaves();
+  });
+}
+async function refreshLeaves() {
+  const body = $("lv-list");
+  if (!body) return;
+  const { data, error } = await db
+    .from("leave_requests")
+    .select("id, leave_date, kind, status, decision_note")
+    .order("leave_date", { ascending: false })
+    .limit(15);
+  if (error) { body.replaceChildren(); return; }
+  body.replaceChildren();
+  if (!data || !data.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4; td.textContent = "申請はまだありません";
+    tr.appendChild(td); body.appendChild(tr);
+    return;
+  }
+  for (const r of data) {
+    const tr = document.createElement("tr");
+    const add = (t, cls) => { const td = document.createElement("td"); td.textContent = t; if (cls) td.className = cls; tr.appendChild(td); return td; };
+    add(r.leave_date.slice(5).replace("-", "/"));
+    add(LEAVE_KIND[r.kind]);
+    add(LEAVE_STATUS[r.status] + (r.status === "rejected" && r.decision_note ? "(" + r.decision_note + ")" : ""),
+        "st-" + (r.status === "pending" ? "pending" : r.status === "approved" ? "approved" : r.status === "rejected" ? "rejected" : ""));
+    const td = document.createElement("td");
+    if (r.status === "pending") {
+      const b = document.createElement("button");
+      b.className = "link"; b.textContent = "取り消す";
+      b.addEventListener("click", async () => {
+        if (!confirm("この申請を取り消します。よろしいですか?")) return;
+        const { error: e2 } = await db.rpc("cancel_leave", { p_id: r.id, p_note: null });
+        if (e2) { setMsg("lv-msg", e2.message, "err"); return; }
+        await refreshLeaves();
+      });
+      td.appendChild(b);
+    }
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+}
+
 // ---- 起動 ----
 async function start() {
   const { data } = await db.auth.getSession();
@@ -472,6 +563,7 @@ async function start() {
   show("app");
   initCorrectionForm();
   initPasswordCard();
+  initLeaveCard();
   await refreshAll();
 }
 start();

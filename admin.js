@@ -207,6 +207,7 @@ async function renderMonth() {
   const first = year + "-" + pad(month) + "-01";
   const last = year + "-" + pad(month) + "-" + pad(lastDay);
   const map = await loadEvents(first, last);
+  const leaves = await loadLeaves(first, last);
   const today = todayJst();
 
   const sum = $("month-summary");
@@ -226,6 +227,7 @@ async function renderMonth() {
       days + "日",
       fmtMinutes(total),
       fmtMinutes(ot),
+      fmtDays(leaveTotal(leaves[p.id])),
       { text: missing ? missing + "件" : "なし", cls: missing ? "flag" : "" },
     ]);
   }
@@ -235,15 +237,22 @@ async function renderMonth() {
   const detail = $("month-detail");
   detail.replaceChildren();
   const byDay = (map[chosen] || {});
-  const days = Object.keys(byDay).sort();
+  const lvDay = (leaves[chosen] || {});
+  const days = [...new Set([...Object.keys(byDay), ...Object.keys(lvDay)])].sort();
   if (!days.length) {
     addRow(detail, [{ text: "この月の記録はありません" }]);
     detail.firstChild.firstChild.colSpan = 7;
     return;
   }
   for (const d of days) {
-    const s = dayStats(byDay[d]);
-    const fl = dayFlag(byDay[d], s, d < today);
+    const evs = byDay[d] || [];
+    const lt = leaveText(lvDay[d]);
+    if (!evs.length) {
+      addRow(detail, [Number(d.slice(8)) + "日", "", "", "", "", "", { text: lt, cls: "" }]);
+      continue;
+    }
+    const s = dayStats(evs);
+    const fl = dayFlag(evs, s, d < today);
     addRow(detail, [
       Number(d.slice(8)) + "日",
       s.cin ? jstTime(s.cin.occurred_at) : "",
@@ -251,7 +260,7 @@ async function renderMonth() {
       fmtMinutes(s.breakMin),
       fmtMinutes(s.workMin),
       s.workMin == null ? "" : fmtMinutes(Math.round(s.otMin)),
-      { text: fl ? fl.text : "", cls: fl ? fl.cls : "" },
+      { text: [fl ? fl.text : "", lt].filter(Boolean).join(" / "), cls: fl ? fl.cls : "" },
     ]);
   }
 }
@@ -372,11 +381,154 @@ $("add-btn").addEventListener("click", async () => {
   $("add-note").value = ""; $("add-time").value = "";
 });
 
+// ---- 有給 ----
+const LEAVE_KIND = { full: "全日", am: "午前休", pm: "午後休" };
+const LEAVE_DAYS = { full: 1, am: 0.5, pm: 0.5 };
+const LEAVE_STATUS = { pending: "申請中", approved: "承認", rejected: "却下", cancelled: "取り消し" };
+function fmtDays(n) { return Number.isInteger(n) ? String(n) : n.toFixed(1); }
+// 月の、承認済みの有給を読み込む。leaves[userId][day] = [kind, ...]
+async function loadLeaves(fromDay, toDay) {
+  const { data, error } = await db
+    .from("leave_requests")
+    .select("user_id, leave_date, kind")
+    .eq("status", "approved")
+    .gte("leave_date", fromDay)
+    .lte("leave_date", toDay)
+    .limit(2000);
+  if (error) {
+    if (error.code === "PGRST205" || error.code === "42P01") return {}; // 有給の表をまだ作っていないとき
+    throw error;
+  }
+  const map = {};
+  for (const r of data || []) {
+    if (!map[r.user_id]) map[r.user_id] = {};
+    if (!map[r.user_id][r.leave_date]) map[r.user_id][r.leave_date] = [];
+    map[r.user_id][r.leave_date].push(r.kind);
+  }
+  return map;
+}
+function leaveText(kinds) { return kinds && kinds.length ? "有給(" + kinds.map((k) => LEAVE_KIND[k]).join("+") + ")" : ""; }
+function leaveTotal(byDay) {
+  let n = 0;
+  for (const d of Object.keys(byDay || {})) for (const k of byDay[d]) n += LEAVE_DAYS[k];
+  return n;
+}
+async function updateLeaveBadge() {
+  const { count, error } = await db.from("leave_requests").select("id", { count: "exact", head: true }).eq("status", "pending");
+  const b = $("leave-badge");
+  if (error || !count) { b.classList.add("hidden"); return; }
+  b.textContent = String(count);
+  b.classList.remove("hidden");
+}
+async function decideLeave(id, approve) {
+  let note = null;
+  if (!approve) {
+    note = prompt("却下の理由(スタッフに表示されます。空欄でも構いません)");
+    if (note === null) return;
+  } else if (!confirm("この有給を承認します。よろしいですか?")) {
+    return;
+  }
+  setMsg("app-msg", "");
+  const { error } = await db.rpc("decide_leave", { p_id: id, p_approve: approve, p_note: note });
+  if (error) { setMsg("app-msg", error.message); return; }
+  await renderLeave();
+}
+async function cancelLeave(id) {
+  const note = prompt("取り消す理由(任意)。取り消すと、月の集計から外れます。");
+  if (note === null) return;
+  setMsg("app-msg", "");
+  const { error } = await db.rpc("cancel_leave", { p_id: id, p_note: note });
+  if (error) { setMsg("app-msg", error.message); return; }
+  await renderLeave();
+}
+async function renderLeave() {
+  const { data: pend, error: e1 } = await db
+    .from("leave_requests")
+    .select("id, user_id, leave_date, kind, reason")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(100);
+  if (e1) throw e1;
+  const pb = $("leave-pending");
+  pb.replaceChildren();
+  if (!pend || !pend.length) {
+    const tr = document.createElement("tr");
+    const td = cell(tr, "申請中のものはありません");
+    td.colSpan = 5;
+    pb.appendChild(tr);
+  }
+  for (const r of pend || []) {
+    const tr = document.createElement("tr");
+    cell(tr, nameOf(r.user_id), "left");
+    cell(tr, r.leave_date.replace(/-/g, "/"));
+    cell(tr, LEAVE_KIND[r.kind]);
+    cell(tr, r.reason || "", "wrap");
+    const tdAct = document.createElement("td");
+    const ok = document.createElement("button");
+    ok.className = "sm ok"; ok.textContent = "承認";
+    ok.addEventListener("click", () => decideLeave(r.id, true));
+    const ng = document.createElement("button");
+    ng.className = "sm ng"; ng.textContent = "却下";
+    ng.addEventListener("click", () => decideLeave(r.id, false));
+    tdAct.append(ok, ng);
+    tr.appendChild(tdAct);
+    pb.appendChild(tr);
+  }
+  const { data: done, error: e2 } = await db
+    .from("leave_requests")
+    .select("id, user_id, leave_date, kind, status, decision_note")
+    .neq("status", "pending")
+    .order("decided_at", { ascending: false, nullsFirst: false })
+    .limit(30);
+  if (e2) throw e2;
+  const dbody = $("leave-done");
+  dbody.replaceChildren();
+  if (!done || !done.length) {
+    const tr = document.createElement("tr");
+    const td = cell(tr, "まだありません");
+    td.colSpan = 6;
+    dbody.appendChild(tr);
+  }
+  for (const r of done || []) {
+    const tr = document.createElement("tr");
+    cell(tr, nameOf(r.user_id), "left");
+    cell(tr, r.leave_date.replace(/-/g, "/"));
+    cell(tr, LEAVE_KIND[r.kind]);
+    cell(tr, LEAVE_STATUS[r.status], r.status === "approved" ? "st-approved" : r.status === "rejected" ? "st-rejected" : "");
+    cell(tr, r.decision_note || "", "wrap");
+    const td = document.createElement("td");
+    if (r.status === "approved") {
+      const b = document.createElement("button");
+      b.className = "sm ng"; b.textContent = "取り消す";
+      b.addEventListener("click", () => cancelLeave(r.id));
+      td.appendChild(b);
+    }
+    tr.appendChild(td);
+    dbody.appendChild(tr);
+  }
+  updateLeaveBadge();
+}
+let addingLeave = false;
+$("lv-btn").addEventListener("click", async () => {
+  if (addingLeave) return;
+  const uid = $("lv-staff").value, day = $("lv-date").value, kind = $("lv-kind").value, note = $("lv-note").value.trim();
+  if (!uid || !day) { setMsg("lv-msg", "スタッフと日付を入力してください。"); $("lv-msg").className = "msg err"; return; }
+  if (!confirm(nameOf(uid) + " さんの " + day.replace(/-/g, "/") + " を、有給(" + LEAVE_KIND[kind] + ")として追加します。よろしいですか?")) return;
+  addingLeave = true;
+  setMsg("lv-msg", "送信中…"); $("lv-msg").className = "msg";
+  const { error } = await db.rpc("admin_add_leave", { p_user: uid, p_date: day, p_kind: kind, p_note: note });
+  addingLeave = false;
+  if (error) { setMsg("lv-msg", error.message); $("lv-msg").className = "msg err"; return; }
+  setMsg("lv-msg", "追加しました。"); $("lv-msg").className = "msg";
+  $("lv-note").value = "";
+  await renderLeave();
+});
+
 // ---- タブ ----
 let currentTab = "today";
 async function showTab(name) {
   currentTab = name;
-  for (const t of ["today", "day", "month", "corr"]) {
+  for (const t of ["today", "day", "month", "corr", "leave"]) {
     $("tab-" + t).classList.toggle("hidden", t !== name);
   }
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
@@ -389,6 +541,7 @@ async function refresh() {
     if (currentTab === "day") await renderDay();
     if (currentTab === "month") await renderMonth();
     if (currentTab === "corr") await renderCorr(); else updateCorrBadge();
+    if (currentTab === "leave") await renderLeave(); else updateLeaveBadge();
   } catch (e) {
     console.error(e);
     setMsg("app-msg", "データを読み込めませんでした。通信状況をご確認ください。" + (e && e.message ? "(" + e.message + ")" : ""));
@@ -505,11 +658,12 @@ async function downloadMonthCsv(kind) {
     const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
     const first = year + "-" + pad(month) + "-01", last = year + "-" + pad(month) + "-" + pad(lastDay);
     const map = await loadEvents(first, last);
+    const leaves = await loadLeaves(first, last);
     const today = todayJst();
     const ym = year + "-" + pad(month);
     const lines = [];
     if (kind === "sum") {
-      lines.push(["対象月", "スタッフ", "出勤日数", "勤務時間(分)", "勤務時間(時:分)", "勤務時間(時間・小数)", "うち時間外(分)", "うち時間外(時:分)", "打刻漏れ(件)"].map(csvCell).join(","));
+      lines.push(["対象月", "スタッフ", "出勤日数", "勤務時間(分)", "勤務時間(時:分)", "勤務時間(時間・小数)", "うち時間外(分)", "うち時間外(時:分)", "有給(日)", "打刻漏れ(件)"].map(csvCell).join(","));
       for (const p of staff) {
         let days = 0, total = 0, ot = 0, missing = 0;
         const byDay = map[p.id] || {};
@@ -519,20 +673,28 @@ async function downloadMonthCsv(kind) {
           if (s.workMin != null) { total += Math.round(s.workMin); ot += Math.round(s.otMin); }
           if (s.incomplete && d < today) missing += 1;
         }
-        lines.push([ym, staffName(p), days, total, fmtMinutes(total), (total / 60).toFixed(2), ot, fmtMinutes(ot), missing].map(csvCell).join(","));
+        lines.push([ym, staffName(p), days, total, fmtMinutes(total), (total / 60).toFixed(2), ot, fmtMinutes(ot), fmtDays(leaveTotal(leaves[p.id])), missing].map(csvCell).join(","));
       }
     } else {
       lines.push(["スタッフ", "日付", "出勤", "退勤", "勤務の数え始め", "休憩(分)", "勤務時間(分)", "勤務時間(時:分)", "うち時間外(分)", "状況"].map(csvCell).join(","));
       for (const p of staff) {
         const byDay = map[p.id] || {};
-        for (const d of Object.keys(byDay).sort()) {
-          const s = dayStats(byDay[d]);
-          const fl = dayFlag(byDay[d], s, d < today);
+        const lvDay = leaves[p.id] || {};
+        for (const d of [...new Set([...Object.keys(byDay), ...Object.keys(lvDay)])].sort()) {
+          const evs = byDay[d] || [];
+          const lt = leaveText(lvDay[d]);
+          if (!evs.length) {
+            lines.push([staffName(p), d, "", "", "", "", "", "", "", lt].map(csvCell).join(","));
+            continue;
+          }
+          const s = dayStats(evs);
+          const fl = dayFlag(evs, s, d < today);
           const w = s.workMin == null ? "" : Math.round(s.workMin);
           lines.push([
             staffName(p), d, s.cin ? jstTime(s.cin.occurred_at) : "", s.cout ? jstTime(s.cout.occurred_at) : "",
             s.countStart == null ? "" : jstTime(s.countStart),
-            s.workMin == null ? "" : Math.round(s.breakMin), w, s.workMin == null ? "" : fmtMinutes(s.workMin), s.workMin == null ? "" : Math.round(s.otMin), fl ? fl.text : ""
+            s.workMin == null ? "" : Math.round(s.breakMin), w, s.workMin == null ? "" : fmtMinutes(s.workMin), s.workMin == null ? "" : Math.round(s.otMin),
+            [fl ? fl.text : "", lt].filter(Boolean).join(" / ")
           ].map(csvCell).join(","));
         }
       }
@@ -576,6 +738,15 @@ async function start() {
     o.textContent = staffName(p);
     addSel.appendChild(o);
   }
+  const lvSel = $("lv-staff");
+  lvSel.replaceChildren();
+  for (const p of staff) {
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = staffName(p);
+    lvSel.appendChild(o);
+  }
+  $("lv-date").value = todayJst();
   $("add-date").value = todayJst();
   $("add-date").max = todayJst();
   $("day-input").value = todayJst();

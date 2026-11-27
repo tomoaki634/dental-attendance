@@ -77,6 +77,7 @@
       <button class="tab" data-tab="day">日別</button>
       <button class="tab" data-tab="month">月別</button>
       <button class="tab" data-tab="corr">修正申請<span id="corr-badge" class="badge hidden">0</span></button>
+      <button class="tab" data-tab="leave">有給<span id="leave-badge" class="badge hidden">0</span></button>
     </div>
     <div id="app-msg" class="msg err"></div>
 
@@ -125,7 +126,7 @@
         </div>
         <h2>スタッフ別の合計</h2>
         <table>
-          <thead><tr><th class="left">スタッフ</th><th>出勤日数</th><th>勤務時間の合計</th><th>うち時間外</th><th>打刻漏れ</th></tr></thead>
+          <thead><tr><th class="left">スタッフ</th><th>出勤日数</th><th>勤務時間の合計</th><th>うち時間外</th><th>有給(日)</th><th>打刻漏れ</th></tr></thead>
           <tbody id="month-summary"></tbody>
         </table>
         <div class="row" style="margin-top:12px">
@@ -174,6 +175,35 @@
           <thead><tr><th class="left">スタッフ</th><th>日付</th><th>種類</th><th>時刻</th><th>結果</th><th class="left">処理した人</th></tr></thead>
           <tbody id="corr-done"></tbody>
         </table>
+      </div>
+    </section>
+
+    <section id="tab-leave" class="hidden">
+      <div class="card">
+        <h2 style="margin-top:0">申請中の有給</h2>
+        <table>
+          <thead><tr><th class="left">スタッフ</th><th>日付</th><th>種類</th><th class="left">理由</th><th>処理</th></tr></thead>
+          <tbody id="leave-pending"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">管理者が直接入れる</h2>
+        <div class="row">
+          <select id="lv-staff"></select>
+          <input id="lv-date" type="date">
+          <select id="lv-kind"><option value="full">全日</option><option value="am">午前休(半日)</option><option value="pm">午後休(半日)</option></select>
+        </div>
+        <textarea id="lv-note" maxlength="300" placeholder="メモ(任意)。例:口頭で申し出あり"></textarea>
+        <button id="lv-btn" class="primary">承認済みとして追加する</button>
+        <div id="lv-msg" class="msg"></div>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">処理済み(直近30件)</h2>
+        <table>
+          <thead><tr><th class="left">スタッフ</th><th>日付</th><th>種類</th><th>結果</th><th class="left">メモ</th><th>取り消し</th></tr></thead>
+          <tbody id="leave-done"></tbody>
+        </table>
+        <p class="note">承認済みの有給は、月別の表とCSVに、日数として入ります(半日は0.5日)。勤務時間や時間外には入りません。</p>
       </div>
     </section>
   </section>
