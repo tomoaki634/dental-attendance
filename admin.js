@@ -410,6 +410,69 @@ $("logout-btn").addEventListener("click", async () => {
 });
 
 // ---- 起動 ----
+// ---- バックアップ(全記録をCSVで保存) ----
+const BK_KEY = "kintai_last_backup";
+function bkLast() { try { return localStorage.getItem(BK_KEY); } catch (e) { return null; } }
+function updateBackupStatus() {
+  const el = $("bk-status");
+  if (!el) return;
+  const last = bkLast();
+  if (!last) { el.className = "qrs ng"; el.textContent = "最後のバックアップ:この端末では記録がありません"; return; }
+  const days = Math.floor((new Date(todayJst() + "T00:00:00Z") - new Date(last + "T00:00:00Z")) / 86400000);
+  el.className = days > 7 ? "qrs ng" : "qrs ok";
+  el.textContent = "最後のバックアップ:" + last + "(" + (days <= 0 ? "きょう" : days + "日前") + ")" + (days > 7 ? " 1週間以上たっています" : "");
+}
+function csvCell(v) {
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+async function downloadBackup() {
+  const btn = $("bk-btn");
+  btn.disabled = true;
+  setMsg("bk-msg", "読み込み中…");
+  try {
+    const rows = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await db
+        .from("attendance_events")
+        .select("id, user_id, event_type, occurred_at, work_date, source, note")
+        .order("id", { ascending: true })
+        .range(from, from + 999);
+      if (error) throw error;
+      rows.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    const names = {};
+    for (const p of staff) names[p.id] = staffName(p);
+    const kind = { clock_in: "出勤", clock_out: "退勤", break_start: "休憩開始", break_end: "休憩終了" };
+    const lines = [["ID", "スタッフ", "日付", "種類", "時刻(日本時間)", "作り方", "メモ"].map(csvCell).join(",")];
+    for (const e of rows) {
+      lines.push([
+        e.id, names[e.user_id] || e.user_id, e.work_date, kind[e.event_type] || e.event_type,
+        jstDate(e.occurred_at) + " " + jstTime(e.occurred_at),
+        e.source === "correction" ? "修正" : "打刻", e.note || ""
+      ].map(csvCell).join(","));
+    }
+    const blob = new Blob(["\uFEFF" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "kintai_backup_" + todayJst().replace(/-/g, "") + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    try { localStorage.setItem(BK_KEY, todayJst()); } catch (e) {}
+    updateBackupStatus();
+    setMsg("bk-msg", rows.length + "件を保存しました。ダウンロードのフォルダを確認してください。");
+  } catch (e) {
+    setMsg("bk-msg", "失敗しました: " + (e.message || e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+$("bk-btn").addEventListener("click", downloadBackup);
+
 async function start() {
   const { data } = await db.auth.getSession();
   if (!data.session) { show("login"); return; }
@@ -443,6 +506,7 @@ async function start() {
   $("add-date").value = todayJst();
   $("add-date").max = todayJst();
   $("day-input").value = todayJst();
+  updateBackupStatus();
   show("app");
   await showTab("today");
 }
