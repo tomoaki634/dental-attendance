@@ -384,7 +384,7 @@ $("add-btn").addEventListener("click", async () => {
 // ---- 有給 ----
 const LEAVE_KIND = { full: "全日", am: "午前休", pm: "午後休" };
 const LEAVE_DAYS = { full: 1, am: 0.5, pm: 0.5 };
-const LEAVE_STATUS = { pending: "申請中", approved: "承認", rejected: "却下", cancelled: "取り消し" };
+const LEAVE_STATUS = { pending: "承認待ち", approved: "登録済み", rejected: "却下", cancelled: "取り消し" };
 function fmtDays(n) { return Number.isInteger(n) ? String(n) : n.toFixed(1); }
 // 月の、承認済みの有給を読み込む。leaves[userId][day] = [kind, ...]
 async function loadLeaves(fromDay, toDay) {
@@ -451,6 +451,7 @@ async function renderLeave() {
   if (e1) throw e1;
   const pb = $("leave-pending");
   pb.replaceChildren();
+  $("leave-pending-card").classList.toggle("hidden", !(pend && pend.length));
   if (!pend || !pend.length) {
     const tr = document.createElement("tr");
     const td = cell(tr, "申請中のものはありません");

@@ -179,8 +179,8 @@
     </section>
 
     <section id="tab-leave" class="hidden">
-      <div class="card">
-        <h2 style="margin-top:0">申請中の有給</h2>
+      <div class="card hidden" id="leave-pending-card">
+        <h2 style="margin-top:0">申請中の有給(承認待ち)</h2>
         <table>
           <thead><tr><th class="left">スタッフ</th><th>日付</th><th>種類</th><th class="left">理由</th><th>処理</th></tr></thead>
           <tbody id="leave-pending"></tbody>
@@ -194,16 +194,16 @@
           <select id="lv-kind"><option value="full">全日</option><option value="am">午前休(半日)</option><option value="pm">午後休(半日)</option></select>
         </div>
         <textarea id="lv-note" maxlength="300" placeholder="メモ(任意)。例:口頭で申し出あり"></textarea>
-        <button id="lv-btn" class="primary">承認済みとして追加する</button>
+        <button id="lv-btn" class="primary">追加する</button>
         <div id="lv-msg" class="msg"></div>
       </div>
       <div class="card">
-        <h2 style="margin-top:0">処理済み(直近30件)</h2>
+        <h2 style="margin-top:0">有給の届出(新しい順・直近30件)</h2>
         <table>
-          <thead><tr><th class="left">スタッフ</th><th>日付</th><th>種類</th><th>結果</th><th class="left">メモ</th><th>取り消し</th></tr></thead>
+          <thead><tr><th class="left">スタッフ</th><th>日付</th><th>種類</th><th>状態</th><th class="left">メモ</th><th>取り消し</th></tr></thead>
           <tbody id="leave-done"></tbody>
         </table>
-        <p class="note">承認済みの有給は、月別の表とCSVに、日数として入ります(半日は0.5日)。勤務時間や時間外には入りません。</p>
+        <p class="note">スタッフが届け出た有給は、承認の手続きなしで、そのまま登録されます。間違いがあれば、「取り消す」で外せます。登録された有給は、月別の表とCSVに、日数として入ります(半日は0.5日)。勤務時間や時間外には入りません。</p>
       </div>
     </section>
   </section>
