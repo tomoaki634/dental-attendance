@@ -431,6 +431,37 @@ async function refreshAll() {
   }
 }
 
+// ---- パスワードの変更(画面の部品は、ここで作る) ----
+function initPasswordCard() {
+  if ($("pw-card")) return;
+  const card = document.createElement("details");
+  card.id = "pw-card";
+  card.className = "card";
+  const mk = (tag, props, text) => { const e = document.createElement(tag); Object.assign(e, props || {}); if (text) e.textContent = text; return e; };
+  card.appendChild(mk("summary", {}, "パスワードを変更する"));
+  card.appendChild(mk("p", { className: "note" }, "最初に渡されたパスワードから、自分だけが知っているパスワードに変えられます。8文字以上で入力してください。"));
+  card.appendChild(mk("label", { htmlFor: "pw-new" }, "新しいパスワード"));
+  card.appendChild(mk("input", { id: "pw-new", type: "password", autocomplete: "new-password" }));
+  card.appendChild(mk("label", { htmlFor: "pw-new2" }, "もう一度、同じパスワード"));
+  card.appendChild(mk("input", { id: "pw-new2", type: "password", autocomplete: "new-password" }));
+  card.appendChild(mk("button", { id: "pw-btn", className: "primary" }, "パスワードを変更する"));
+  card.appendChild(mk("div", { id: "pw-msg", className: "msg" }));
+  const anchor = $("corr-card");
+  anchor.parentNode.insertBefore(card, anchor.nextSibling);
+  $("pw-btn").addEventListener("click", async () => {
+    const a = $("pw-new").value, b = $("pw-new2").value;
+    if (a.length < 8) { setMsg("pw-msg", "パスワードは8文字以上にしてください。", "err"); return; }
+    if (a !== b) { setMsg("pw-msg", "2回の入力が一致しません。", "err"); return; }
+    $("pw-btn").disabled = true;
+    setMsg("pw-msg", "変更中…");
+    const { error } = await db.auth.updateUser({ password: a });
+    $("pw-btn").disabled = false;
+    if (error) { setMsg("pw-msg", "変更できませんでした: " + error.message, "err"); return; }
+    $("pw-new").value = ""; $("pw-new2").value = "";
+    setMsg("pw-msg", "パスワードを変更しました。次回から、新しいパスワードでログインしてください。", "ok");
+  });
+}
+
 // ---- 起動 ----
 async function start() {
   const { data } = await db.auth.getSession();
@@ -440,6 +471,7 @@ async function start() {
   $("user-name").textContent = (prof && prof.name) || currentUser.email;
   show("app");
   initCorrectionForm();
+  initPasswordCard();
   await refreshAll();
 }
 start();
