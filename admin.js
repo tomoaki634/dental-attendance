@@ -206,7 +206,7 @@ async function renderMonth() {
     for (const d of Object.keys(byDay)) {
       const s = dayStats(byDay[d]);
       if (s.cin) days += 1;
-      if (s.workMin != null) total += s.workMin;
+      if (s.workMin != null) total += Math.round(s.workMin);
       if (s.incomplete && d < today) missing += 1;
     }
     addRow(sum, [
@@ -472,6 +472,64 @@ async function downloadBackup() {
   }
 }
 $("bk-btn").addEventListener("click", downloadBackup);
+
+// ---- 月別CSV(給与計算用) ----
+function saveCsv(filename, lines) {
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+async function downloadMonthCsv(kind) {
+  setMsg("csv-msg", "読み込み中…");
+  try {
+    const { year, month } = targetMonth();
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const first = year + "-" + pad(month) + "-01", last = year + "-" + pad(month) + "-" + pad(lastDay);
+    const map = await loadEvents(first, last);
+    const today = todayJst();
+    const ym = year + "-" + pad(month);
+    const lines = [];
+    if (kind === "sum") {
+      lines.push(["対象月", "スタッフ", "出勤日数", "勤務時間(分)", "勤務時間(時:分)", "勤務時間(時間・小数)", "打刻漏れ(件)"].map(csvCell).join(","));
+      for (const p of staff) {
+        let days = 0, total = 0, missing = 0;
+        const byDay = map[p.id] || {};
+        for (const d of Object.keys(byDay)) {
+          const s = dayStats(byDay[d]);
+          if (s.cin) days += 1;
+          if (s.workMin != null) total += Math.round(s.workMin);
+          if (s.incomplete && d < today) missing += 1;
+        }
+        lines.push([ym, staffName(p), days, total, fmtMinutes(total), (total / 60).toFixed(2), missing].map(csvCell).join(","));
+      }
+    } else {
+      lines.push(["スタッフ", "日付", "出勤", "退勤", "休憩(分)", "勤務時間(分)", "勤務時間(時:分)", "状況"].map(csvCell).join(","));
+      for (const p of staff) {
+        const byDay = map[p.id] || {};
+        for (const d of Object.keys(byDay).sort()) {
+          const s = dayStats(byDay[d]);
+          const fl = dayFlag(byDay[d], s, d < today);
+          const w = s.workMin == null ? "" : Math.round(s.workMin);
+          lines.push([
+            staffName(p), d, s.cin ? jstTime(s.cin.occurred_at) : "", s.cout ? jstTime(s.cout.occurred_at) : "",
+            s.workMin == null ? "" : Math.round(s.breakMin), w, s.workMin == null ? "" : fmtMinutes(s.workMin), fl ? fl.text : ""
+          ].map(csvCell).join(","));
+        }
+      }
+    }
+    saveCsv("kintai_" + (kind === "sum" ? "goukei_" : "meisai_") + ym.replace("-", "") + ".csv", lines);
+    setMsg("csv-msg", year + "年" + month + "月の" + (kind === "sum" ? "合計" : "日別明細") + "を保存しました。");
+  } catch (e) {
+    setMsg("csv-msg", "失敗しました: " + (e.message || e));
+  }
+}
+$("csv-sum").addEventListener("click", () => downloadMonthCsv("sum"));
+$("csv-detail").addEventListener("click", () => downloadMonthCsv("detail"));
 
 async function start() {
   const { data } = await db.auth.getSession();

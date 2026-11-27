@@ -128,6 +128,12 @@
           <thead><tr><th class="left">スタッフ</th><th>出勤日数</th><th>勤務時間の合計</th><th>打刻漏れ</th></tr></thead>
           <tbody id="month-summary"></tbody>
         </table>
+        <div class="row" style="margin-top:12px">
+          <button id="csv-sum" class="sm ok">この月の合計をCSVで保存</button>
+          <button id="csv-detail" class="sm ok">この月の日別明細をCSVで保存</button>
+        </div>
+        <div id="csv-msg" class="msg"></div>
+        <p class="note">給与計算用です。勤務時間は、休憩(13:00〜14:30)を引いた時間で、1日ごとに分単位で四捨五入しています。「打刻漏れ」の日は、勤務時間が空欄になります。</p>
       </div>
       <div class="card">
         <div class="row">
