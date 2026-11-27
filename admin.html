@@ -125,7 +125,7 @@
         </div>
         <h2>スタッフ別の合計</h2>
         <table>
-          <thead><tr><th class="left">スタッフ</th><th>出勤日数</th><th>勤務時間の合計</th><th>打刻漏れ</th></tr></thead>
+          <thead><tr><th class="left">スタッフ</th><th>出勤日数</th><th>勤務時間の合計</th><th>うち時間外</th><th>打刻漏れ</th></tr></thead>
           <tbody id="month-summary"></tbody>
         </table>
         <div class="row" style="margin-top:12px">
@@ -133,7 +133,7 @@
           <button id="csv-detail" class="sm ok">この月の日別明細をCSVで保存</button>
         </div>
         <div id="csv-msg" class="msg"></div>
-        <p class="note">給与計算用です。勤務時間は、休憩(13:00〜14:30)を引いた時間で、1日ごとに分単位で四捨五入しています。「打刻漏れ」の日は、勤務時間が空欄になります。</p>
+        <p class="note">給与計算用です。勤務時間は、休憩(13:00〜14:30)を引いた時間で、1日ごとに分単位で四捨五入しています。「時間外」は、19:00を過ぎて働いた分で、勤務時間に含まれています。「打刻漏れ」の日は、勤務時間が空欄になります。</p>
       </div>
       <div class="card">
         <div class="row">
@@ -141,7 +141,7 @@
           <select id="staff-select"></select>
         </div>
         <table>
-          <thead><tr><th>日</th><th>出勤</th><th>退勤</th><th>休憩</th><th>勤務</th><th>状況</th></tr></thead>
+          <thead><tr><th>日</th><th>出勤</th><th>退勤</th><th>休憩</th><th>勤務</th><th>時間外</th><th>状況</th></tr></thead>
           <tbody id="month-detail"></tbody>
         </table>
       </div>

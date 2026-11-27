@@ -18,6 +18,15 @@ function breakOverlapMin(day, cinTs, coutTs) {
   return Math.max(0, (b - a) / 60000);
 }
 
+// 時間外労働の開始時刻(日本時間)。これを過ぎた分が「時間外」になる
+const OT_START = cfg.OVERTIME_START || "19:00";
+function overtimeMin(day, cinTs, coutTs) {
+  const s = new Date(day + "T" + OT_START + ":00+09:00").getTime();
+  const a = Math.max(s, new Date(cinTs).getTime());
+  const b = new Date(coutTs).getTime();
+  return Math.max(0, (b - a) / 60000);
+}
+
 let staff = [];        // { id, name, role }
 let monthOffset = 0;
 
@@ -69,13 +78,15 @@ function dayStats(evs) {
     }
   }
   let workMin = null;
+  let otMin = null;
   if (cin && cout) {
+    otMin = overtimeMin(sorted[0].work_date, cin.occurred_at, cout.occurred_at);
     breakMin = breakOverlapMin(sorted[0].work_date, cin.occurred_at, cout.occurred_at); // 休憩の時間帯と重なった分を引く
     workMin = (new Date(cout.occurred_at) - new Date(cin.occurred_at)) / 60000 - breakMin;
   }
   const status = sorted.length ? NEXT_STATUS[sorted[sorted.length - 1].event_type] : "none";
   const incomplete = sorted.length > 0 && (!cin || !cout || bs !== null);
-  return { cin, cout, bsEv, beEv, breakMin, workMin, status, incomplete };
+  return { cin, cout, bsEv, beEv, breakMin, workMin, otMin, status, incomplete };
 }
 
 const TYPE_TEXT = { clock_in: "出勤", clock_out: "退勤" };
@@ -201,18 +212,19 @@ async function renderMonth() {
   sum.replaceChildren();
   sum.dataset.leftFirst = "1";
   for (const p of staff) {
-    let days = 0, total = 0, missing = 0;
+    let days = 0, total = 0, ot = 0, missing = 0;
     const byDay = map[p.id] || {};
     for (const d of Object.keys(byDay)) {
       const s = dayStats(byDay[d]);
       if (s.cin) days += 1;
-      if (s.workMin != null) total += Math.round(s.workMin);
+      if (s.workMin != null) { total += Math.round(s.workMin); ot += Math.round(s.otMin); }
       if (s.incomplete && d < today) missing += 1;
     }
     addRow(sum, [
       staffName(p),
       days + "日",
       fmtMinutes(total),
+      fmtMinutes(ot),
       { text: missing ? missing + "件" : "なし", cls: missing ? "flag" : "" },
     ]);
   }
@@ -225,7 +237,7 @@ async function renderMonth() {
   const days = Object.keys(byDay).sort();
   if (!days.length) {
     addRow(detail, [{ text: "この月の記録はありません" }]);
-    detail.firstChild.firstChild.colSpan = 6;
+    detail.firstChild.firstChild.colSpan = 7;
     return;
   }
   for (const d of days) {
@@ -237,6 +249,7 @@ async function renderMonth() {
       s.cout ? jstTime(s.cout.occurred_at) : "",
       fmtMinutes(s.breakMin),
       fmtMinutes(s.workMin),
+      s.workMin == null ? "" : fmtMinutes(Math.round(s.otMin)),
       { text: fl ? fl.text : "", cls: fl ? fl.cls : "" },
     ]);
   }
@@ -495,20 +508,20 @@ async function downloadMonthCsv(kind) {
     const ym = year + "-" + pad(month);
     const lines = [];
     if (kind === "sum") {
-      lines.push(["対象月", "スタッフ", "出勤日数", "勤務時間(分)", "勤務時間(時:分)", "勤務時間(時間・小数)", "打刻漏れ(件)"].map(csvCell).join(","));
+      lines.push(["対象月", "スタッフ", "出勤日数", "勤務時間(分)", "勤務時間(時:分)", "勤務時間(時間・小数)", "うち時間外(分)", "うち時間外(時:分)", "打刻漏れ(件)"].map(csvCell).join(","));
       for (const p of staff) {
-        let days = 0, total = 0, missing = 0;
+        let days = 0, total = 0, ot = 0, missing = 0;
         const byDay = map[p.id] || {};
         for (const d of Object.keys(byDay)) {
           const s = dayStats(byDay[d]);
           if (s.cin) days += 1;
-          if (s.workMin != null) total += Math.round(s.workMin);
+          if (s.workMin != null) { total += Math.round(s.workMin); ot += Math.round(s.otMin); }
           if (s.incomplete && d < today) missing += 1;
         }
-        lines.push([ym, staffName(p), days, total, fmtMinutes(total), (total / 60).toFixed(2), missing].map(csvCell).join(","));
+        lines.push([ym, staffName(p), days, total, fmtMinutes(total), (total / 60).toFixed(2), ot, fmtMinutes(ot), missing].map(csvCell).join(","));
       }
     } else {
-      lines.push(["スタッフ", "日付", "出勤", "退勤", "休憩(分)", "勤務時間(分)", "勤務時間(時:分)", "状況"].map(csvCell).join(","));
+      lines.push(["スタッフ", "日付", "出勤", "退勤", "休憩(分)", "勤務時間(分)", "勤務時間(時:分)", "うち時間外(分)", "状況"].map(csvCell).join(","));
       for (const p of staff) {
         const byDay = map[p.id] || {};
         for (const d of Object.keys(byDay).sort()) {
@@ -517,7 +530,7 @@ async function downloadMonthCsv(kind) {
           const w = s.workMin == null ? "" : Math.round(s.workMin);
           lines.push([
             staffName(p), d, s.cin ? jstTime(s.cin.occurred_at) : "", s.cout ? jstTime(s.cout.occurred_at) : "",
-            s.workMin == null ? "" : Math.round(s.breakMin), w, s.workMin == null ? "" : fmtMinutes(s.workMin), fl ? fl.text : ""
+            s.workMin == null ? "" : Math.round(s.breakMin), w, s.workMin == null ? "" : fmtMinutes(s.workMin), s.workMin == null ? "" : Math.round(s.otMin), fl ? fl.text : ""
           ].map(csvCell).join(","));
         }
       }
