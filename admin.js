@@ -18,14 +18,10 @@ function breakOverlapMin(day, cinTs, coutTs) {
   return Math.max(0, (b - a) / 60000);
 }
 
-// 時間外労働の開始時刻(日本時間)。これを過ぎた分が「時間外」になる
-const OT_START = cfg.OVERTIME_START || "19:00";
-function overtimeMin(day, cinTs, coutTs) {
-  const s = new Date(day + "T" + OT_START + ":00+09:00").getTime();
-  const a = Math.max(s, new Date(cinTs).getTime());
-  const b = new Date(coutTs).getTime();
-  return Math.max(0, (b - a) / 60000);
-}
+// 始業の時刻(日本時間)。これより早く打刻しても、この時刻から勤務として数える
+const WORK_START = cfg.WORK_START || "09:15";
+// 1日の勤務が、この分数(8時間)を超えた分を「時間外」とする
+const DAILY_LIMIT_MIN = 480;
 
 let staff = [];        // { id, name, role }
 let monthOffset = 0;
@@ -79,14 +75,19 @@ function dayStats(evs) {
   }
   let workMin = null;
   let otMin = null;
+  let countStart = null;
   if (cin && cout) {
-    otMin = overtimeMin(sorted[0].work_date, cin.occurred_at, cout.occurred_at);
-    breakMin = breakOverlapMin(sorted[0].work_date, cin.occurred_at, cout.occurred_at); // 休憩の時間帯と重なった分を引く
-    workMin = (new Date(cout.occurred_at) - new Date(cin.occurred_at)) / 60000 - breakMin;
+    const day = sorted[0].work_date;
+    const startTs = Math.max(new Date(cin.occurred_at).getTime(), new Date(day + "T" + WORK_START + ":00+09:00").getTime());
+    const endTs = Math.max(startTs, new Date(cout.occurred_at).getTime());
+    breakMin = breakOverlapMin(day, startTs, endTs); // 休憩の時間帯と重なった分を引く
+    workMin = (endTs - startTs) / 60000 - breakMin;
+    countStart = startTs;
+    otMin = Math.max(0, Math.round(workMin) - DAILY_LIMIT_MIN);
   }
   const status = sorted.length ? NEXT_STATUS[sorted[sorted.length - 1].event_type] : "none";
   const incomplete = sorted.length > 0 && (!cin || !cout || bs !== null);
-  return { cin, cout, bsEv, beEv, breakMin, workMin, otMin, status, incomplete };
+  return { cin, cout, bsEv, beEv, breakMin, workMin, otMin, countStart, status, incomplete };
 }
 
 const TYPE_TEXT = { clock_in: "出勤", clock_out: "退勤" };
@@ -521,7 +522,7 @@ async function downloadMonthCsv(kind) {
         lines.push([ym, staffName(p), days, total, fmtMinutes(total), (total / 60).toFixed(2), ot, fmtMinutes(ot), missing].map(csvCell).join(","));
       }
     } else {
-      lines.push(["スタッフ", "日付", "出勤", "退勤", "休憩(分)", "勤務時間(分)", "勤務時間(時:分)", "うち時間外(分)", "状況"].map(csvCell).join(","));
+      lines.push(["スタッフ", "日付", "出勤", "退勤", "勤務の数え始め", "休憩(分)", "勤務時間(分)", "勤務時間(時:分)", "うち時間外(分)", "状況"].map(csvCell).join(","));
       for (const p of staff) {
         const byDay = map[p.id] || {};
         for (const d of Object.keys(byDay).sort()) {
@@ -530,6 +531,7 @@ async function downloadMonthCsv(kind) {
           const w = s.workMin == null ? "" : Math.round(s.workMin);
           lines.push([
             staffName(p), d, s.cin ? jstTime(s.cin.occurred_at) : "", s.cout ? jstTime(s.cout.occurred_at) : "",
+            s.countStart == null ? "" : jstTime(s.countStart),
             s.workMin == null ? "" : Math.round(s.breakMin), w, s.workMin == null ? "" : fmtMinutes(s.workMin), s.workMin == null ? "" : Math.round(s.otMin), fl ? fl.text : ""
           ].map(csvCell).join(","));
         }
